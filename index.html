@@ -1790,6 +1790,26 @@
             transform: scale(1.04);
         }
 
+
+        body.evening .morning-light,
+        body.evening .morning-beams,
+        body.evening .morning-horizon,
+        body.evening .morning-glints,
+        body.evening .sun-dust-layer,
+        body.evening #farCloudLayer {
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        body.morning .morning-light,
+        body.morning .morning-beams,
+        body.morning .morning-horizon,
+        body.morning .morning-glints,
+        body.morning .sun-dust-layer {
+            visibility: visible;
+        }
+
         /* --- RESPONSIVE UI --- */
         @media (max-width: 680px) {
             body.morning .morning-beams { opacity:.82; }
@@ -2120,6 +2140,7 @@
         let birdInterval;
         let birdStartTimeout;
         let sunInteractionInterval;
+        let nightLanternInterval;
 
         /* =========================================================
            LOCATION + WEATHER ENGINE
@@ -2260,22 +2281,29 @@
 
                 if (farLayer) {
                     const cloudOpacity = Math.min(.98, .72 + (cloudCover / 100) * .28);
-                    farLayer.style.opacity = currentModeTime === 'morning' ? cloudOpacity.toFixed(3) : '';
+                    farLayer.style.opacity = currentModeTime === 'morning'
+                        ? cloudOpacity.toFixed(3)
+                        : '0';
                 }
 
                 if (morningLight) {
                     const lightOpacity = Math.max(.48, .98 - (cloudCover / 100) * .42);
-                    morningLight.style.setProperty('--weather-light-opacity', lightOpacity.toFixed(3));
+                    morningLight.style.setProperty('--weather-light-opacity',
+                        currentModeTime === 'morning' ? lightOpacity.toFixed(3) : '0');
                 }
 
                 if (beams) {
                     const beamOpacity = Math.max(.28, .98 - (cloudCover / 100) * .55);
-                    beams.style.opacity = currentModeTime === 'morning' ? beamOpacity.toFixed(3) : '';
+                    beams.style.opacity = currentModeTime === 'morning'
+                        ? beamOpacity.toFixed(3)
+                        : '0';
                 }
 
                 if (glints) {
                     const glintOpacity = Math.max(.25, .72 - (cloudCover / 100) * .46);
-                    glints.style.opacity = currentModeTime === 'morning' ? glintOpacity.toFixed(3) : '';
+                    glints.style.opacity = currentModeTime === 'morning'
+                        ? glintOpacity.toFixed(3)
+                        : '0';
                 }
             }
 
@@ -2533,8 +2561,11 @@
             clearInterval(sunInteractionInterval);
 
             createMorningAtmosphere();
-            for (let i = 0; i < 5; i++) createCloud(true);
-            spawnInterval = setInterval(() => createCloud(false), 5000);
+            if (currentModeTime !== 'morning') return;
+            for (let i = 0; i < 5 && currentModeTime === 'morning'; i++) createCloud(true);
+            spawnInterval = setInterval(() => {
+                if (currentModeTime === 'morning') createCloud(false);
+            }, 5000);
 
             // Chiếc đầu tiên có thời điểm xuất hiện chắc chắn. Sau đó chỉ
             // spawn khi không còn máy bay trên màn hình, tránh bị mất lượt vì random.
@@ -2570,34 +2601,12 @@
         }
 
         function setMode(mode) {
-            /* Morning-only layers must NEVER survive into evening.
-               Clear weather-applied inline opacity before/after mode switch. */
-            const morningOnlyLayers = [
-                document.querySelector('.morning-beams'),
-                document.querySelector('.morning-horizon'),
-                document.querySelector('.morning-glints')
-            ];
+            const nextMode = mode === 'morning' ? 'morning' : 'evening';
+            currentModeTime = nextMode;
 
-            morningOnlyLayers.forEach(layer => {
-                if (!layer) return;
-                layer.style.opacity = '';
-            });
+            updateModeTestUI(nextMode);
 
-            if (mode === 'evening') {
-                morningOnlyLayers.forEach(layer => {
-                    if (layer) layer.style.setProperty('opacity', '0', 'important');
-                });
-            } else {
-                morningOnlyLayers.forEach(layer => {
-                    if (layer) layer.style.removeProperty('opacity');
-                });
-            }
-
-            currentModeTime = mode;
-            updateModeTestUI(mode);
-            document.body.className = mode;
-            
-            document.querySelectorAll('.lantern-container, .cloud-container, .tiny-lantern-container, .airplane-wrapper, .github-bird-flock').forEach(e => e.remove());
+            /* Dọn sạch toàn bộ hiệu ứng của mode cũ trước khi đổi mode. */
             clearInterval(spawnInterval);
             clearInterval(tinyLanternInterval);
             clearInterval(airplaneInterval);
@@ -2605,26 +2614,72 @@
             clearInterval(birdInterval);
             clearTimeout(birdStartTimeout);
             clearInterval(sunInteractionInterval);
-            
+            clearInterval(nightLanternInterval);
+
+            document.querySelectorAll(
+                '.lantern-container, .cloud-container, .tiny-lantern-container, ' +
+                '.airplane-wrapper, .github-bird-flock'
+            ).forEach(e => e.remove());
+
+            /* Xóa mọi mây động còn sót trước khi chuyển mode. */
+            document.querySelectorAll('.cloud-container').forEach(e => e.remove());
+
+            const morningOnlySelectors = [
+                '.morning-light',
+                '.morning-beams',
+                '.morning-horizon',
+                '.morning-glints',
+                '.sun-dust-layer'
+            ];
+
+            morningOnlySelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    el.style.removeProperty('opacity');
+                    el.style.removeProperty('--weather-light-opacity');
+                    el.style.removeProperty('--weather-beam-opacity');
+                    el.style.removeProperty('--weather-glint-opacity');
+                    el.classList.remove('active', 'visible', 'show');
+                });
+            });
+
+            document.body.classList.remove('morning', 'evening');
+            document.body.classList.add(nextMode);
+
             const celestial = document.querySelector('.moon');
-            if(mode === 'morning') celestial.classList.add('sun-mode');
-            else celestial.classList.remove('sun-mode');
-            
+            if (celestial) celestial.classList.toggle('sun-mode', nextMode === 'morning');
+
+            /* Weather messages vẫn được giữ, nhưng cảnh phải theo mode. */
             weatherMessages = weatherData ? buildWeatherMessages(weatherData) : [];
             rebuildMessageQueue({ resetIndex: true });
-            
+
             const greetingTitle = document.getElementById('introGreeting');
+            const subtitle = document.querySelector('.intro-subtitle');
             if (greetingTitle) {
-                greetingTitle.textContent = mode === 'morning' ? "Chào buổi sáng, chị Hân! ☀️" : "Đêm muộn rồi, chị Hân... 🌙";
-                document.querySelector('.intro-subtitle').textContent = mode === 'morning' ? "Em có một món quà nhỏ gửi tặng chị ✨" : "Em có một món quà nhỏ gửi tặng chị 🌙✨";
+                greetingTitle.textContent =
+                    nextMode === 'morning'
+                        ? "Chào buổi sáng, chị Hân! ☀️"
+                        : "Đêm muộn rồi, chị Hân... 🌙";
+            }
+            if (subtitle) {
+                subtitle.textContent =
+                    nextMode === 'morning'
+                        ? "Em có một món quà nhỏ gửi tặng chị ✨"
+                        : "Em có một món quà nhỏ gửi tặng chị 🌙✨";
             }
 
-            if(!document.getElementById('intro-screen')) {
-                if (mode === 'morning') {
+            /* Nếu intro còn mở thì chưa spawn cảnh; mở quà xong mới chạy. */
+            if (!document.getElementById('intro-screen')) {
+                if (nextMode === 'morning') {
                     startMorningEffects();
+                    /* Áp lại weather sau khi morning DOM được khởi tạo. */
+                    if (weatherData?.current) applyWeatherToSky(weatherData.current);
                 } else {
-                    spawnInterval = setInterval(() => createLantern(0,0,true), 1800);
+                    /* Ban đêm: chỉ có hệ thống đèn trời đêm, tuyệt đối không tạo mây. */
+                    spawnInterval = null;
+                    airplaneInterval = null;
+                    birdInterval = null;
                     tinyLanternInterval = setInterval(createTinyLantern, 1500);
+                    nightLanternInterval = setInterval(() => createLantern(0, 0, true), 1800);
                 }
             }
         }
